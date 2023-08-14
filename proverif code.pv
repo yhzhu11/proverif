@@ -1,0 +1,162 @@
+free secure_channel:channel[private].
+free public_channel:channel.
+type GP.
+type Zq.
+type spkey.
+const P:GP.
+const t_block:Zq.
+free s:Zq[private].
+free P_pub:GP.
+free SK_ij:Zq[private].
+free SK_ji:Zq[private].
+free ID_SD:bitstring[private].
+free ID_ES:bitstring.
+free PK_ES:GP.
+free M:bitstring[private].
+free l:Zq.
+
+fun h1(GP):Zq.
+fun h2(Zq,Zq):Zq.
+fun h3(bitstring):Zq.
+fun h4(bitstring,GP):Zq.
+fun h5(Zq,GP,GP,GP):Zq.
+fun h6(bitstring,bitstring,GP,GP):Zq.
+
+fun pm(Zq,GP):GP.
+fun add_Zq(bitstring):Zq.
+fun add_GP(GP,GP):GP.
+fun mul_Zq(Zq,Zq):Zq.
+fun xor(Zq,Zq):Zq.
+reduc forall x:Zq,y:Zq;
+rxor(xor(x,y),y) = x.
+
+fun spk(Zq):spkey.
+fun sign(GP,Zq):bitstring.
+reduc forall m:GP,n:Zq;getmess(sign(m,n)) = m.
+reduc forall m:GP,n:Zq;checksign(sign(m,n),spk(n)) = m.
+
+
+fun senc(GP,GP):bitstring.
+reduc forall message:GP,TK:GP;
+sdec(senc(message,TK),TK)=message.
+
+fun senc1(bitstring,GP):bitstring.
+reduc forall message:bitstring,TK:GP;
+sdec1(senc1(message,TK),TK)=message.
+
+fun senc2(GP,Zq):bitstring.
+reduc forall message:GP,TK:Zq;
+sdec2(senc2(message,TK),TK)=message.
+
+fun con(GP,bitstring):bitstring.
+reduc forall m:GP,n:bitstring;
+lde(con(m,n)) = m.
+reduc forall m:GP,n:bitstring;
+rde(con(m,n)) = n.
+
+event authES(Zq).
+event authSD(Zq).
+event regisES.
+event regisSD.
+
+query attacker(s). 
+query attacker(SK_ij).
+query attacker(SK_ji).
+noninterf M.
+query SK:Zq;inj-event(authSD(SK)) ==> inj-event(authES(SK)). 
+query SK:Zq;inj-event(authES(SK))==>inj-event(regisSD).
+query SK:Zq;inj-event(authSD(SK))==>inj-event(regisES).
+
+
+let RA()=
+let P_pub=pm(s,P) in
+in(secure_channel,(ID:bitstring,request:nat));
+if(request=1) then
+(new r1:Zq;
+new r2:Zq;
+let R1=pm(r1,P) in
+let R2=pm(r2,P) in
+let x=add_Zq((r1,mul_Zq(s,h4(ID,R1)))) in(*x = r1 + sh4(ID,R1)*)
+let PK_ES=pm(x,P) in
+let key_material=xor(add_Zq((r2,s)),h1(pm(s,PK_ES))) in(*key_material = (r2 + s) xor h1(sPK_ES)*)
+out(secure_channel,(1,R1,R2,x,key_material)))
+else
+(new k:Zq;
+let K=pm(k,P) in
+let w=add_Zq((k,mul_Zq(s,h4(ID,K)))) in
+let W=pm(w,P) in
+let sig_w=sign(W,s) in
+out(secure_channel,(2,K,w,sig_w))).
+
+let ES(P_pub:GP,PK_ES:GP,l:Zq,t_block:Zq)=
+out(secure_channel,(ID_ES,1));
+in(secure_channel,(n1:nat,R1:GP,R2:GP,x:Zq,U:GP,key_material:Zq));
+let PK_ES=pm(x,P) in
+if(n1=1) then
+    if(pm(x,P)=add_GP(R1,pm(h4(ID_ES,R1),P_pub))) then
+    let v=rxor(key_material,h1(pm(x,P_pub))) in
+    event regisES;
+
+in(public_channel,(n2:nat,W:GP,sig_w:bitstring,CT_token:bitstring,t_date:bitstring));
+let TK=pm(x,W) in
+let y=sdec1(CT_token,TK)in
+if(n2=3)
+then
+if(lde(y)=W && W=checksign(sig_w,spk(s)))then
+new d:Zq;
+new n:Zq;
+let D=pm(d,P) in
+let a_l=add_Zq((n,h2(x,add_Zq((h3(rde(y)),l))))) in(*a_l = n + h2(x,h3(t_date)+l)*)
+let a1=pm(a_l,U) in
+let a2=add_GP(W,pm(a_l,P_pub)) in
+let p_l=add_Zq((d,h5(add_Zq((t_date,mul_Zq(l,t_block))),D,a1,a2))) in
+let M = senc1(con(D,con(a2,con(a1,(0,p_l)))),TK) in
+out(public_channel,(5,M));
+
+in(public_channel,(ID:bitstring,A:GP,sig:Zq,a1:GP,a2:GP,D:GP,T1:bitstring,t_l:Zq));
+if(pm(sig,P)=add_GP(A,pm(h4(T1,A),add_GP(D,pm(h5(t_l,D,a1,a2),add_GP(R2,P_pub))))))
+then
+new b:Zq;
+new T2:bitstring;
+let B=pm(b,P) in
+let SK1=pm(b,A) in
+let SK2=pm(x,A) in
+let SK_ij=h6(ID_ES,T2,SK1,SK2) in
+let Enc_b=senc2(B,SK_ij) in
+out(public_channel,(B,T2,Enc_b));
+event authES(SK_ij).
+
+let SD(PK_ES:GP,P_pub:GP,l:Zq,t_block:Zq)=
+out(secure_channel,(ID_SD,2));
+in(secure_channel,(n:nat,K:GP,w:Zq,sig_w:bitstring));
+let W=pm(w,P)in
+if(n=2)then
+if(W=add_GP(K,pm(h4(ID_SD,K),P_pub)))then
+event regisSD();
+
+new t_date:bitstring;
+let TK=pm(w,PK_ES) in
+let CT_token=senc1(con(W,t_date),TK) in
+out(public_channel,(3,W,sig_w,CT_token,t_date));
+in(public_channel,M_1:bitstring);
+let (=5,M:bitstring)= M_1 in
+let Dec_M=sdec1(M,TK) in
+let D = lde(Dec_M) in
+let a2 = lde(rde(Dec_M)) in
+let a1 = lde(rde(rde(Dec_M))) in
+let (=0,p_l:Zq) = rde(rde(rde(Dec_M))) in
+new a:Zq;
+new T1:bitstring;
+let A=pm(a,P) in
+let sig=add_Zq((a,mul_Zq(p_l,h4(T1,A)))) in 
+let t_l=add_Zq((t_date,mul_Zq(l,t_block))) in
+out(public_channel,(ID_ES,A,sig,a1,a2,D,T1,t_l));
+in(public_channel,(B:GP,T2:bitstring,Enc_b:bitstring));
+let SK1=pm(a,B) in
+let SK2=pm(a,PK_ES) in
+let SK_ji=h6(ID_ES,T2,SK1,SK2) in
+if(sdec2(Enc_b,SK_ji)=B) then
+event authSD(SK_ji).
+
+process
+(!RA())|(!ES(P_pub,PK_ES,l,t_block))|(!SD(PK_ES,P_pub,l,t_block))
